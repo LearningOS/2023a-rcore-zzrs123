@@ -25,6 +25,7 @@ mod sbi;
 #[path = "boards/qemu.rs"]
 mod board;
 
+// 将同目录下的汇编文件 entry.asm 嵌入到代码中
 global_asm!(include_str!("entry.asm"));
 
 /// clear BSS segment
@@ -37,6 +38,8 @@ pub fn clear_bss() {
 }
 
 /// the rust entry-point of os
+// no_mangle表示编译器不要重命名或者修饰下面的名字，
+// 不然整个地址空间的跳转就找不到了，链接失败
 #[no_mangle]
 pub fn rust_main() -> ! {
     extern "C" {
