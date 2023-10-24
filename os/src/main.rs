@@ -35,8 +35,9 @@ pub mod sbi;
 pub mod sync;
 pub mod syscall;
 pub mod trap;
-
+// ch1介绍过了
 global_asm!(include_str!("entry.asm"));
+// 三个数据段分别插入了7个应用程序的二进制镜像
 global_asm!(include_str!("link_app.S"));
 
 /// clear BSS segment

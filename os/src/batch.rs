@@ -1,4 +1,5 @@
 //! batch subsystem
+// 应用管理器
 
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -11,6 +12,8 @@ const MAX_APP_NUM: usize = 16;
 const APP_BASE_ADDRESS: usize = 0x80400000;
 const APP_SIZE_LIMIT: usize = 0x20000;
 
+// 字节数组的简单包装
+// 实例化在批处理操作系统的 .bss 段
 #[repr(align(4096))]
 struct KernelStack {
     data: [u8; KERNEL_STACK_SIZE],
@@ -32,6 +35,7 @@ impl KernelStack {
     fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + KERNEL_STACK_SIZE
     }
+    // 将TrapContext结构体压入内核栈
     pub fn push_context(&self, cx: TrapContext) -> &'static mut TrapContext {
         let cx_ptr = (self.get_sp() - core::mem::size_of::<TrapContext>()) as *mut TrapContext;
         unsafe {
@@ -42,11 +46,14 @@ impl KernelStack {
 }
 
 impl UserStack {
+    // get_sp就是获取栈顶指针
+    // 由于在 RISC-V 中栈是向下增长的，返回包裹的数组的结尾地址
     fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + USER_STACK_SIZE
     }
 }
 
+// 应用管理器
 struct AppManager {
     num_app: usize,
     current_app: usize,
@@ -87,6 +94,7 @@ impl AppManager {
         // Therefore, fence.i must be executed after we have loaded
         // the code of the next app into the instruction memory.
         // See also: riscv non-priv spec chapter 3, 'Zifencei' extension.
+        // 清理 i-cache
         asm!("fence.i");
     }
 
@@ -99,7 +107,11 @@ impl AppManager {
     }
 }
 
+
+// 借助 lazy_static! 声明了一个 AppManager 结构的名为 APP_MANAGER 的全局实例 
+// 只有在它第一次被使用到的时候才会进行实际的初始化工作。
 lazy_static! {
+    // 用容器 UPSafeCell 包裹 AppManager 是为了防止全局对象 APP_MANAGER 被重复获取。
     static ref APP_MANAGER: UPSafeCell<AppManager> = unsafe {
         UPSafeCell::new({
             extern "C" {

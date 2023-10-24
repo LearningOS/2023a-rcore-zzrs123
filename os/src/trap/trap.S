@@ -9,8 +9,11 @@
     .globl __alltraps
     .globl __restore
     .align 2
-__alltraps:
+__alltraps: 
+    # 将 CSR 当前的值读到通用寄存器 中，
+    # 然后将 通用寄存器 的值写入该 CSR 
     csrrw sp, sscratch, sp
+    # 现在 sp 指向内核栈， sscratch 指向用户栈。
     # now sp->kernel stack, sscratch->user stack
     # allocate a TrapContext on kernel stack
     addi sp, sp, -34*8
