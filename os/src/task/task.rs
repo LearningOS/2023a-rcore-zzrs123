@@ -29,15 +29,12 @@ pub struct TaskControlBlock {
     /// Program break
     pub program_brk: usize,
 
-    /// new: time of program started
+    /// ch4 TaskInfo support
     pub start_time: usize,
-
-    /// new: program has been doing
-    pub doing: bool,
-
-    /// new: record times of syscall
-    pub syscall_times: [u8; MAX_SYSCALL_NUM]
-    
+    /// ch4 TaskInfo support
+    pub started: bool,
+    /// ch4 TaskInfo support
+    pub syscall_times: [u8;MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlock {
@@ -74,7 +71,7 @@ impl TaskControlBlock {
             heap_bottom: user_sp,
             program_brk: user_sp,
             start_time: 0,
-            doing:false,
+            started: false,
             syscall_times:[0;MAX_SYSCALL_NUM],
         };
         // prepare TrapContext in user space

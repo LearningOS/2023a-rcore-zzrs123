@@ -1,6 +1,7 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
-use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum,PhysAddr};
+use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum, PhysAddr};
+
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -65,7 +66,7 @@ impl PageTableEntry {
     }
 }
 
-/// page table structure，页表结构体
+/// page table structure
 pub struct PageTable {
     root_ppn: PhysPageNum,
     frames: Vec<FrameTracker>,
@@ -174,10 +175,11 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
 }
 
 
-pub fn virt_to_phys(token: usize, va: VirtAddr) -> PhysAddr {
-    let page_table = PageTable::from_token(token);
+/// ch4: address v2p 恒等映射情况可用
+pub fn virt_to_pyhs(token: usize,va: VirtAddr) -> PhysAddr{
+    let pagetable = PageTable::from_token(token);
     let vpn = va.floor();
-    let mut pa: PhysAddr = page_table.translate(vpn).unwrap().ppn().into();
+    let mut pa:PhysAddr = pagetable.translate(vpn).unwrap().ppn().into();
     pa.0 += va.page_offset();
     pa
 }
@@ -185,6 +187,7 @@ pub fn virt_to_phys(token: usize, va: VirtAddr) -> PhysAddr {
 /// ch4: return a physical pointer in memory set of the pagetable token 
 pub fn translated_mut_ptr<T>(token: usize, ptr: *mut T) -> &'static mut T{
     let ptr_va = VirtAddr::from(ptr as usize);
-    let ptr_pa = virt_to_phys(token, ptr_va);
+    let ptr_pa = virt_to_pyhs(token, ptr_va);
     ptr_pa.get_mut()
 }
+
