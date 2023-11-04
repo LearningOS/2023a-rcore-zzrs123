@@ -1,12 +1,14 @@
 //! Process management syscalls
-
-
 use crate::{
     config::{MAX_SYSCALL_NUM, PAGE_SIZE},
     task::{
         change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
-        get_current_task_info,mmap,munmap,current_user_token,
-    },mm::translated_mut_ptr,timer::get_time_us,
+        mmap,munmap,
+        current_user_token,
+        get_current_task_info,
+    },
+    mm::translated_mut_ptr,
+    timer::get_time_us,
 };
 
 #[repr(C)]
@@ -44,11 +46,16 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    let us = get_time_us();
+    let p_ts = translated_mut_ptr(current_user_token(), ts);
+    *p_ts = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    0
 }
-
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
