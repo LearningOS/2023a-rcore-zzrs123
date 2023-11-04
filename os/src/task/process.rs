@@ -49,6 +49,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// deadlock detect
+    pub deadlock_detect: bool,
+    /// mutex_avail
+    pub mutex_avail: Vec<usize>,
+    /// sem_avail
+    pub sem_avail: Vec<usize>,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +125,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    mutex_avail: Vec::new(),
+                    sem_avail: Vec::new(),
                 })
             },
         });
@@ -221,6 +230,8 @@ impl ProcessControlBlock {
         let pid = pid_alloc();
         // copy fd table
         let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        // copy deadlock detect
+        let deadlock_detect = parent.deadlock_detect;
         for fd in parent.fd_table.iter() {
             if let Some(file) = fd {
                 new_fd_table.push(Some(file.clone()));
@@ -245,6 +256,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect,
+                    mutex_avail: Vec::new(),
+                    sem_avail: Vec::new(),
                 })
             },
         });
