@@ -130,7 +130,7 @@ impl PhysAddr {
     pub fn floor(&self) -> PhysPageNum {
         PhysPageNum(self.0 / PAGE_SIZE)
     }
-    /// Get the (ceil) physical page number
+    /// Get the (ceil) physical page number，下一个物理页号
     pub fn ceil(&self) -> PhysPageNum {
         PhysPageNum((self.0 - 1 + PAGE_SIZE) / PAGE_SIZE)
     }
@@ -145,6 +145,7 @@ impl PhysAddr {
 }
 impl From<PhysAddr> for PhysPageNum {
     fn from(v: PhysAddr) -> Self {
+        // 从物理地址(PhysAddr)转换为物理页帧号(PhysPageNum)时，物理地址的偏移量(page offset)必须为0
         assert_eq!(v.page_offset(), 0);
         v.floor()
     }

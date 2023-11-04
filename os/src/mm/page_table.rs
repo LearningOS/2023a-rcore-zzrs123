@@ -1,6 +1,6 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
-use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum,PhysAddr};
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -20,8 +20,9 @@ bitflags! {
 }
 
 #[derive(Copy, Clone)]
+// 指定结构体或枚举的内存布局规则为C风格。
 #[repr(C)]
-/// page table entry structure
+/// page table entry structure,页表项结构体
 pub struct PageTableEntry {
     /// bits of page table entry
     pub bits: usize,
@@ -64,7 +65,7 @@ impl PageTableEntry {
     }
 }
 
-/// page table structure
+/// page table structure，页表结构体
 pub struct PageTable {
     root_ppn: PhysPageNum,
     frames: Vec<FrameTracker>,
@@ -170,4 +171,20 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+
+pub fn virt_to_phys(token: usize, va: VirtAddr) -> PhysAddr {
+    let page_table = PageTable::from_token(token);
+    let vpn = va.floor();
+    let mut pa: PhysAddr = page_table.translate(vpn).unwrap().ppn().into();
+    pa.0 += va.page_offset();
+    pa
+}
+
+/// ch4: return a physical pointer in memory set of the pagetable token 
+pub fn translated_mut_ptr<T>(token: usize, ptr: *mut T) -> &'static mut T{
+    let ptr_va = VirtAddr::from(ptr as usize);
+    let ptr_pa = virt_to_phys(token, ptr_va);
+    ptr_pa.get_mut()
 }
