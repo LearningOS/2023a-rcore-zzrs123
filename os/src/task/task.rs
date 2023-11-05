@@ -1,15 +1,17 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{self, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::config::{TRAP_CONTEXT_BASE, MAX_SYSCALL_NUM};
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+
+pub const BIG_STRIDE: isize = 10000;
 
 /// Task control block structure
 ///
@@ -31,13 +33,20 @@ impl TaskControlBlock {
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
-    /// Get the address of app's page table
-    pub fn get_user_token(&self) -> usize {
-        let inner = self.inner_exclusive_access();
-        inner.memory_set.token()
+
+    /// add passed value
+    pub fn add_passed(&self) {
+        self.inner.exclusive_access().add_passed_value();
     }
+    // Get the address of app's page table
+    // pub fn get_user_token(&self) -> usize {
+    //     trace!("TCB get user token");
+    //     let inner: RefMut<'_, TaskControlBlockInner> = self.inner_exclusive_access();
+    //     inner.memory_set.token()
+    // }
 }
 
+/// TaskControlBlockInner
 pub struct TaskControlBlockInner {
     /// The physical page number of the frame where the trap context is placed
     pub trap_cx_ppn: PhysPageNum,
@@ -64,6 +73,8 @@ pub struct TaskControlBlockInner {
 
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
+
+    /// fd table
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
 
     /// Heap bottom
@@ -72,25 +83,45 @@ pub struct TaskControlBlockInner {
     /// Program break
     pub program_brk: usize,
 
-    /// For Schedule
-    pub stride: usize,
-    /// For Schedule
-    pub priority: usize,
+    /// The task call time
+    pub run_time: [usize; MAX_SYSCALL_NUM],
+
+    /// The task start time
+    pub start_time: usize,
+
+    /// priori
+    pub priori: isize,
+
+    /// passed
+    pub passed: isize,
 }
 
 impl TaskControlBlockInner {
+    /// add passed value
+    pub fn add_passed_value(&mut self) {
+        self.passed += BIG_STRIDE / self.priori;
+    }
+
+    /// get task context
+    pub fn get_task_context(&self) -> &TaskContext {
+        &self.task_cx
+    }
+    /// get the trap context
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
+    /// get user token
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
     fn get_status(&self) -> TaskStatus {
         self.task_status
     }
+    /// is zombie
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+    /// alloc fd
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -140,8 +171,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
-                    stride: 0,
-                    priority: 16,
+                    start_time: 0,
+                    run_time: [0; MAX_SYSCALL_NUM],
+                    priori: 16,
+                    passed: 0,
                 })
             },
         };
@@ -223,8 +256,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
-                    stride: 0,
-                    priority: 16,
+                    start_time: 0,
+                    run_time: [0; MAX_SYSCALL_NUM],
+                    priori: parent_inner.priori,
+                    passed: parent_inner.passed,
                 })
             },
         });
@@ -269,135 +304,6 @@ impl TaskControlBlock {
         } else {
             None
         }
-    }
-
-    /// ch5: spawn
-    pub fn spawn(self: &Arc<TaskControlBlock>, elf_data: &[u8]) -> Arc<TaskControlBlock> {
-        // get parent inner exclusively
-        let mut parent_inner = self.inner_exclusive_access();
-        // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
-        let trap_cx_ppn = memory_set
-            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
-            .unwrap()
-            .ppn();
-        // alloc a pid and a kernel stack in kernel space
-        let pid_handle = pid_alloc();
-        let kernel_stack = kstack_alloc();
-        let kernel_stack_top = kernel_stack.get_top();
-        // push a taskcontext which goes to trap_return to the top of kernel stack
-        let task_control_block = Arc::new(Self {
-            pid: pid_handle,
-            kernel_stack,
-            inner: unsafe {
-                UPSafeCell::new(TaskControlBlockInner {
-                    trap_cx_ppn,
-                    base_size: user_sp,
-                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-                    task_status: TaskStatus::Ready,
-                    memory_set,
-                    parent: Some(Arc::downgrade(self)),
-                    children: Vec::new(),
-                    exit_code: 0,
-                    fd_table: vec![
-                        // 0 -> stdin
-                        Some(Arc::new(Stdin)),
-                        // 1 -> stdout
-                        Some(Arc::new(Stdout)),
-                        // 2 -> stderr
-                        Some(Arc::new(Stdout)),
-                    ],
-                    heap_bottom: user_sp,
-                    program_brk: user_sp,
-                    stride: 0,
-                    priority: 16,
-                })
-            },
-        });
-
-        // add the pcb to chain of parent's child
-        parent_inner.children.push(task_control_block.clone());
-
-        // prepare TrapContext in user space
-        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
-
-        *trap_cx = TrapContext::app_init_context(
-            entry_point,
-            user_sp,
-            KERNEL_SPACE.exclusive_access().token(),
-            kernel_stack_top,
-            trap_handler as usize,
-        );
-
-        task_control_block
-    }
-
-    /// ch5: mmap
-    pub fn mmap(self: &Arc<TaskControlBlock>, start: usize, len: usize, _port: usize) -> isize {
-        let start_va = mm::VirtAddr(start);
-        let end_va = mm::VirtAddr(start + len);
-        // handle flags
-        let map_permission =
-            MapPermission::from_bits((_port as u8) << 1).unwrap() | MapPermission::U;
-
-        let mut inner = self.inner_exclusive_access();
-
-        // check if pages have been mapped
-        for vpn in mm::VPNRange::new(mm::VirtPageNum::from(start_va), end_va.ceil()) {
-            if let Some(pte) = inner.memory_set.translate(vpn) {
-                if pte.is_valid() {
-                    return -1;
-                }
-            }
-        }
-
-        inner
-            .memory_set
-            .insert_framed_area(start_va, end_va, map_permission);
-
-        // 成功性检查
-
-        for vpn in mm::VPNRange::new(mm::VirtPageNum::from(start_va), end_va.ceil()) {
-            if let None = inner.memory_set.translate(vpn) {
-                return -1;
-            }
-        }
-
-        0
-    }
-
-    /// ch5: munmap
-    pub fn munmap(self: &Arc<TaskControlBlock>, start: usize, len: usize) -> isize {
-        let start_va = mm::VirtAddr(start);
-        let end_va = mm::VirtAddr(start + len);
-
-        let mut inner = self.inner_exclusive_access();
-
-        for vpn in mm::VPNRange::new(mm::VirtPageNum::from(start_va), end_va.ceil()) {
-            match inner.memory_set.translate(vpn) {
-                Some(pte) => {
-                    if pte.is_valid() == false {
-                        return -1;
-                    }
-                }
-                None => {
-                    return -1;
-                }
-            }
-        }
-
-        inner
-            .memory_set
-            .remove_area_with_start_vpn(mm::VirtPageNum::from(start_va));
-
-        0
-    }
-
-    ///  set priority of the process
-    pub fn set_priority(self: &Arc<TaskControlBlock>, prio: isize) -> isize {
-        let mut inner = self.inner_exclusive_access();
-        inner.priority = prio as usize;
-        inner.priority as isize
     }
 }
 
